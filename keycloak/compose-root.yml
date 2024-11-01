@@ -1,0 +1,47 @@
+services:
+  keycloak:
+    container_name: keycloak
+    image: quay.io/keycloak/keycloak:26.0.5
+    environment:
+      - KC_BOOTSTRAP_ADMIN_USERNAME=admin
+      - KC_BOOTSTRAP_ADMIN_PASSWORD=password
+      - KC_CACHE=ispn # Use infinispan caching
+      - KC_DB=postgres
+      - KC_DB_URL_HOST=postgres
+      - KC_DB_URL_DATABASE=keycloakdb
+      - KC_DB_USERNAME=postgres
+      - KC_DB_PASSWORD=password
+      - KC_LOG_LEVEL=INFO,org.infinispan:INFO,org.jgroups:INFO
+    ports:
+      - "8080:8080"
+    command: start-dev
+    depends_on:
+      - postgres
+
+  postgres:
+    container_name: postgres
+    image: docker.io/postgres:16.4
+    environment:
+      - POSTGRES_DB=keycloakdb
+      - POSTGRES_PASSWORD=password
+      - PGDATA=/var/db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_keycloak:/var/db
+
+  pgadmin:
+    container_name: pgadmin
+    image: docker.io/elestio/pgadmin:latest
+    environment:
+      - PGADMIN_DEFAULT_EMAIL=admin@example.com
+      - PGADMIN_DEFAULT_PASSWORD=password
+      - PGADMIN_DISABLE_POSTFIX=true
+      - PGADMIN_SERVER_JSON_FILE=/var/pgadmin-config/servers.json
+    ports:
+      - "8081:80"
+    volumes:
+      - ./pgadmin-config:/var/pgadmin-config
+
+volumes:
+  postgres_keycloak:
