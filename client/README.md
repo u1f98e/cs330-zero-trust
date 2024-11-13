@@ -3,10 +3,16 @@ A client daemon that runs in the background, automatically validating connection
 
 ## Installation
 ```bash
-make # Build the client
-sudo make install # Install the client and service file to the system
+# If you haven't cloned submodules, get them
+git submodule update --init
 
-INSTALL_PREFIX="mydir" make install # Or install to a different directory
+# Configure the build 
+cmake -B build -S .
+# Build the project
+cmake --build build
+
+# Install the project to the system
+cmake --install build
 ```
 
 After installation, you can start and enable the service:

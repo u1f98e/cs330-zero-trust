@@ -20,8 +20,8 @@ docker-compose -f compose-root.yml down
 You should then be able to access the Keycloak admin console and the
 pgAdmin database consoles. Default credentials can be found in the compose file.
 
-- Keycloak admin console: https://localhost:8080
-- Database admin console: https://localhost:8081
+- Keycloak admin console: http://localhost:8080
+- Database admin console: http://localhost:8081
 
 ### Caching
 
