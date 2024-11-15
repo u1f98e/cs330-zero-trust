@@ -1,12 +1,14 @@
 #include <cstdio>
 #include <iostream>
 #include <string>
+#include <thread>
 #include <vector>
 
 extern "C" {
 #include "wireguard.h"
 }
 #include "wg_types.h"
+#include "listen.h"
 
 std::vector<std::string> get_device_names() {
 	// wg_list_device_names hands back an array of
@@ -25,12 +27,6 @@ std::vector<std::string> get_device_names() {
 	return name_vec;
 }
 
-void create_wg_interface(const char* name) {
-	wg_device* dev;
-	wg_add_device(name);
-	wg_get_device(&dev, name);
-}
-
 int main(int argc, char* argv[]) {
 	if(argc > 1) {
 		if(std::string(argv[1]) == "list") {
@@ -42,4 +38,8 @@ int main(int argc, char* argv[]) {
 		}
 	}
 
+	auto tunnel = WgDevice::create_device("wgTest0");
+
+	// Start listening for peer connection requests on another thread
+	std::thread peer_listen_thread(listen_for_peers);
 }

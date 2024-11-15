@@ -3,10 +3,7 @@ A client daemon that runs in the background, automatically validating connection
 
 ## Installation
 ```bash
-# If you haven't cloned submodules, get them
-git submodule update --init
-
-# Configure the build 
+# Configure the build and download dependencies
 cmake -B build -S .
 # Build the project
 cmake --build build
@@ -22,7 +19,8 @@ sudo systemctl enable zt-client.service # Enable on startup (optional)
 sudo systemctl start zt-client.service
 ```
 
-## License
+## Licenses
 wireguard.c and wireguard.h are licensed under the LGPL-2.1+.
 
 The original source for wireguard.c and wireguard.h can be found [here](https://git.zx2c4.com/wireguard-tools/tree/contrib/embeddable-wg-library)
+
