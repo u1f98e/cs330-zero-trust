@@ -1,3 +1,0 @@
-[submodule "client/socket-cpp"]
-	path = client/socket-cpp
-	url = https://github.com/embeddedmz/socket-cpp.git

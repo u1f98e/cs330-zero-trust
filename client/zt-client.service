@@ -1,9 +1,0 @@
-[Unit]
-Description=Test daemon for automatically authenticating new wireguard connections
-After=network.target
-
-[Service]
-ExecStart=/usr/local/bin/zt-clientd
-
-[Install]
-WantedBy=multi-user.target
