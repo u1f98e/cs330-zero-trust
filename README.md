@@ -3,10 +3,25 @@
 # Setup
 
 ## Authentication Servers
-
 For our authentication server, we use [Keycloak](https://keycloak.org). 
 
-To start a keycloak instance, you can use the provided [docker compose](https://docs.docker.com/compose/install/)
+### Combined Docker Image (GNS3)
+A Dockerfile is provided to build a combined Keycloak/PostgreSQL image for use 
+in GNS3 as a node. To build it:
+
+```
+cd keycloak
+docker build . --tag zt-keycloak
+```
+
+Then, you should be able to choose the `zt-keycloak` image in GNS3 to create a 
+docker node.
+
+You can access the Keycloak admin console at: http://localhost:8080
+
+### Docker Compose
+For deployment on a full system, prefer using [docker compose](https://docs.docker.com/compose/install/).
+To start a keycloak instance, you can use the provided compose-root.yml
 file:
 
 ```bash
