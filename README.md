@@ -17,6 +17,10 @@ docker build . --tag zt-keycloak
 Then, you should be able to choose the `zt-keycloak` image in GNS3 to create a 
 docker node.
 
+From within GNS3, you can edit the docker image to add
+a volume mount at `/var/db` to avoid needing to set up
+the database each time the container starts.
+
 You can access the Keycloak admin console at: http://localhost:8080
 
 ### Docker Compose
