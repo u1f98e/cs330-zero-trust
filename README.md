@@ -59,3 +59,9 @@ TODO: How do cache servers get specified/discovered?
 ## Tunnel Client
 Our custom host to host client uses wireguard to form secure tunnels between hosts.
 
+A Dockerfile is also provided for running the client as a GNS3 device:
+
+```bash
+cd client
+docker build . --tag zt-host
+```

@@ -1,4 +1,8 @@
+attrs==24.2.0
 cffi==1.17.1
 cryptography==43.0.3
 pycparser==2.22
 PyJWT==2.9.0
+pyroute2==0.7.12
+segno==1.6.1
+wireguard-tools==0.5.0

@@ -1,4 +1,5 @@
 import subprocess
+from pyroute2 import IPRoute
 from typing import Self, List, Tuple
 
 class DeviceConfig:
@@ -13,13 +14,19 @@ class Peer:
 
 class WireguardDevice:
 	_name: str
+	_addr: str
+	_mask: int
 
-	def create(interface_name: str) -> Self:
-		subprocess.run(["wg-quick", "up", interface_name])
-		return WireguardDevice(interface_name)
+	def up(interface_name: str) -> Self:
+		dev = WireguardDevice()
+		dev._name = interface_name
+		dev._addr = "10.5.0.1"
+		dev._mask = 24
 
-	def __init__(interface_name):
-		name = interface_name
+		ip = IPRoute()
+		ip.addr("add", address=dev._addr, mask=dev._mask, label=dev._name)
+
+		return dev
 
 	def add_peer(self, peer: Peer):
 		params = []
@@ -40,5 +47,6 @@ class WireguardDevice:
 
 		subprocess.run(["wg", "set", self._name] + params)
 
-	def close(self):
-		subprocess.run(["wg-quick", "down", self.name])
+	def down(self):
+		ip = IPRoute()
+		ip.addr("delete", address=self._addr, mask=self._mask, label=self._name)

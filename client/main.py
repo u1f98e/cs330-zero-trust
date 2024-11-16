@@ -7,24 +7,32 @@ import sys
 from zt_host.wireguard import WireguardDevice, Peer
 
 MAX_MESSAGE_SIZE=4096
-TOKEN_PUBLIC_KEY = ""
+PORT = 9090
 
 class ZtContext:
     wg: WireguardDevice
+    name: str
+    pub_key: str
 
     def __init__(_wg: WireguardDevice):
         wg = _wg
 
+def request_connection(ip: str, ctx: ZtContext):
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.bind((ip, PORT))
+
+    # TODO: Make auth request to get jwt
+    token = json.dumps({ "name": ctx.name, "wg_pub": ctx.pub_key })
+    s.sendall("")
+
 def handle_connect_request(token: str, ctx: ZtContext):
     # decoded = jwt.decode(token, key=TOKEN_PUBLIC_KEY, algorithms=['RS256',])
-    decoded = token
-    peer_nickname = decoded["nick"]
-    peer_pub_key = decoded["wg_pub"]
+    decoded = json.load(token)
 
     peer = Peer()
     peer.nickname = decoded["name"]
     peer.public_key = decoded["wg_pub"]
-    ctx.wg.add_peer()
+    ctx.wg.add_peer(peer)
 
 def process_peer_message(data: str, ctx: ZtContext):
     msg = json.load(data)
@@ -60,7 +68,7 @@ def daemon_main():
     ctx = ZtContext(wg)
 
     try:
-        peer_listen_args = ("127.0.0.1", 9090, ctx)
+        peer_listen_args = ("127.0.0.1", PORT, ctx)
         # threading.Thread(target=listen_for_peers, args=peer_listen_args)
         listen_for_peers(*peer_listen_args)
         print("Hi")
