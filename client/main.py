@@ -1,43 +1,114 @@
+import datetime
+import itertools
 import socket
 import threading
 import json
+from typing import List
 import jwt
 import sys
+from wireguard_tools import WireguardKey
 
-from zt_host.wireguard import WireguardDevice, Peer
+from zt_host.auth import ZTAuth, PeerAuthToken
+from zt_host.wireguard import ZTDevice, Peer
 
 MAX_MESSAGE_SIZE=4096
-PORT = 9090
+WIREGUARD_PORT = 8888
+COMM_PORT = 8889
+
+class Session:
+    peer_addr: str
+    peer_pub_key: str
+    expiration: datetime
 
 class ZtContext:
-    wg: WireguardDevice
+    wg: ZTDevice
+    auth: ZTAuth
     name: str
     pub_key: str
 
-    def __init__(_wg: WireguardDevice):
-        wg = _wg
+    incoming_sessions: List[Session] = []
+    outgoing_sessions: List[Session] = []
 
-def request_connection(ip: str, ctx: ZtContext):
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.bind((ip, PORT))
+    def __init__(self, _wg: ZTDevice):
+        self.wg = _wg
 
-    # TODO: Make auth request to get jwt
-    token = json.dumps({ "name": ctx.name, "wg_pub": ctx.pub_key })
-    s.sendall("")
+    def expire_incoming(self):
+        def f(session: Session):
+            if session.expiration < now:
+               self.wg.remove_peer(session.peer_pub_key) 
+               return False
+            else:
+                return True
 
-def handle_connect_request(token: str, ctx: ZtContext):
+        now = datetime.datetime.now()
+        self.incoming_sessions[:] = itertools.filterfalse(f, self.incoming_sessions)
+
+    def refresh_session(self, peer_addr: str):
+        for session in self.outgoing_sessions:
+            if session.peer_addr == peer_addr:
+                token = self.auth.request_refresh_token()
+
+    def send_connect_request(peer_addr: str, token: PeerAuthToken):
+        # Open a socket to the peer so we know the laddr,
+        # the local address used to communicate with it
+        peer_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        peer_sock.bind((peer_addr, COMM_PORT))
+        local_addr, _ = peer_sock.getsockname()
+
+        request = {
+            "type": "connect",
+            "token": token.jwt
+        }
+
+        peer_sock.sendall(json.dumps(request) + '\n')
+
+    def request_connection(self, peer_addr: str):
+        """Authorize and request a connection to a peer"""
+        # Open a socket to the peer so we know the laddr,
+        # the local address used to communicate with it
+        peer_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        peer_sock.bind((peer_addr, COMM_PORT))
+        local_addr, _ = peer_sock.getsockname()
+
+        token = self.auth.request_connection_token(peer_addr, local_addr)
+
+        # TODO: This is a fake token for now
+        token.jwt = { 
+            "name": self.name, 
+            "wg_pub": self.pub_key,
+            "addr": local_addr,
+            "ips": [local_addr],
+        }
+        print(token.jwt)
+
+        request = {
+            "type": "connect",
+            "token": token.jwt
+        }
+
+        peer_sock.sendall(json.dumps(request) + '\n')
+
+def handle_connect_request(token: str, client_addr: str, ctx: ZtContext):
     # decoded = jwt.decode(token, key=TOKEN_PUBLIC_KEY, algorithms=['RS256',])
     decoded = json.load(token)
 
     peer = Peer()
-    peer.nickname = decoded["name"]
+    peer.name = decoded["name"]
     peer.public_key = decoded["wg_pub"]
+    peer.endpoint_addr = decoded["addr"]
+    peer.endpoint_port = WIREGUARD_PORT
+    peer.allowed_ips = decoded["ips"]
+
+    if client_addr != peer.endpoint_addr:
+        print("Error: Failed to add new peer, connection address does not match endpoint address")
+        return
+
     ctx.wg.add_peer(peer)
 
-def process_peer_message(data: str, ctx: ZtContext):
+def process_peer_message(data: str, client_addr: str, ctx: ZtContext):
     msg = json.load(data)
     if msg["type"] == "connect":
-        handle_connect_request(msg.jwt)
+        handle_connect_request(msg.jwt, client_addr)
 
 # Listen for new peer connection requests,
 # validating the request's JWT token and opening
@@ -57,23 +128,32 @@ def listen_for_peers(host, port, ctx: ZtContext):
                 data: str = reader.readline(MAX_MESSAGE_SIZE)
                 if not data:
                     break
-                process_peer_message(data, ctx)
+
+                args = (data, client_addr, ctx)
+                threading.Thread(target=process_peer_message, args=args)
 
         except Exception as e:
             print(f"Error while processing message: {e}")
 
 def daemon_main():
-    # Create wireguard interface
-    wg = WireguardDevice.create("wgTest0")
+    private_key = WireguardKey.generate()
+    wg = (
+        ZTDevice.create("wgTest0", 
+                        private_key = str(private_key),
+                        public_key = str(private_key.public_key()),
+                        wg_addr = '10.0.0.2',
+                        listen_port = WIREGUARD_PORT)
+    )
+
     ctx = ZtContext(wg)
 
     try:
-        peer_listen_args = ("127.0.0.1", PORT, ctx)
+        peer_listen_args = ("localhost", COMM_PORT, ctx)
         # threading.Thread(target=listen_for_peers, args=peer_listen_args)
         listen_for_peers(*peer_listen_args)
         print("Hi")
     finally:
-        wg.close()
+        wg.down()
 
 def _help():
     print("zt-host [connect <peer-ip>]")
