@@ -70,19 +70,18 @@ class ZTAuth:
 		self.system_cred = ""
 		# TODO
 
-	def request_connection_token(self, peer_addr: str, local_addr: str) -> PeerAuthToken:
+	def request_connection_token(self, peer_addr: str, local_addr: str, pub_key) -> PeerAuthToken:
 		def request(sock: socket.socket) -> PeerAuthToken:
-			token = PeerAuthToken()
 			# TODO: This is a fake token for now
 			claims = { 
-				"name": self.name, 
-				"pub": self.pub_key,
+				"pub": pub_key,
 				"addr": local_addr,
 				"ips": [local_addr],
 				"exp": datetime.datetime.fromisoformat("2030-01-01").isoformat()
 			}
 
-			token.jwt = jwt.encode(token, key=AUTH_PUBLIC_KEY, algorithms=['RS256',])
+			token = PeerAuthToken()
+			token.jwt = jwt.encode(claims, key=AUTH_PUBLIC_KEY, algorithm=['RS256',])
 			token.expiration = claims['exp']
 			print(token.jwt)
 
@@ -90,6 +89,6 @@ class ZTAuth:
 
 		return self.on_best_node(request)
 
-	def request_refresh_token(self, peer_addr: str) -> PeerAuthToken:
+	def request_refresh_token(self, peer_addr: str, local_addr: str) -> PeerAuthToken:
 		# TODO if there ends up being a different implementation
-		return self.request_connection_token(peer_addr)
+		return self.request_connection_token(peer_addr, local_addr)

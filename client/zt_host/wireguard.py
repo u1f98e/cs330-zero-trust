@@ -19,12 +19,14 @@ class ZTDevice:
     ifname: str
     wg_addr: str # The address for this device within the wireguard network
     listen_port: int # The port which this device will use for wireguard connections
+    pub_key: str
 
     def create(ifname: str, public_key: str, private_key: str, wg_addr: str, listen_port: int, force: bool = False) -> Self:
         dev = ZTDevice()
         dev.ifname = ifname
         dev.wg_addr = wg_addr
         dev.listen_port = listen_port
+        dev.pub_key = public_key
 
         with NDB() as ndb:
             if dev.ifname in ndb.interfaces:

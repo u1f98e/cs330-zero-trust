@@ -1,6 +1,6 @@
 FROM docker.io/python:3.13-bookworm
 RUN apt update && \
-	DEBIAN_FRONTEND=noninteractive apt install -y iproute2 net-tools vim nano
+	DEBIAN_FRONTEND=noninteractive apt install -y iproute2 net-tools iputils-ping vim nano tmux
 
 RUN mkdir -p /root/zt-host
 WORKDIR /root/zt-host
