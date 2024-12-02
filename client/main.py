@@ -1,7 +1,6 @@
 import argparse
 import datetime
 import itertools
-import os
 import sched
 import socket
 import threading
@@ -78,10 +77,16 @@ class ZtContext:
             "type": "connect",
             "token": token.jwt
         }
+        if DEBUG:
+            print(f"DBG: Sending request {json.dumps(request)}")
 
         s = peer_sock.makefile('rw')
         s.write(json.dumps(request) + '\n')
-        response = json.loads(s.readline(MAX_MESSAGE_SIZE))
+        s.flush()
+        response = s.readline(MAX_MESSAGE_SIZE)
+        if DEBUG:
+            print(f"Recieved: {response}")
+        response = json.loads(response)
         if "result" not in response:
             raise Exception("Response message from peer did not contain 'result' field")
         if response["result"] != "ok":
@@ -97,19 +102,24 @@ class ZtContext:
         self.outgoing_sessions[session.peer_pub_key] = session
 
     def handle_connect_request(self, token: str, client_addr: str):
+        if DEBUG:
+            print("DBG: Handling connection request")
         decoded = jwt.decode(token, key=AUTH_PUBLIC_KEY, algorithms=['RS256',])
-        decoded = json.load(token)
+        if DEBUG:
+            print(f"DBG: {decoded}")
 
         peer = Peer()
-        peer.name = decoded["name"]
         peer.public_key = decoded["pub"]
         peer.endpoint_addr = decoded["addr"]
         peer.endpoint_port = WIREGUARD_PORT
-        peer.allowed_ips = decoded["ips"]
+        peer.allowed_ips = decoded["ips"].split(";")
         expiration = decoded["exp"]
 
         if client_addr != peer.endpoint_addr:
             print("Error: Failed to add new peer, connection address does not match endpoint address")
+            if DEBUG:
+                print(f"DBG: client_addr: {client_addr}")
+                print(f"DBG: endpoint_addr: {peer.endpoint_addr}")
             return
 
         self.wg.add_peer(peer)
@@ -124,9 +134,25 @@ class ZtContext:
         self.scheduler.enterabs(expiration, 1, ZtContext.expire_incoming_sessions, argument=[self])
 
     def process_peer_message(self, data: str, client_addr: str):
-        msg = json.load(data)
+        msg = json.loads(data)
         if msg["type"] == "connect":
-            self.handle_connect_request(msg.jwt, client_addr)
+            self.handle_connect_request(msg["token"], client_addr)
+        
+    def process_peer_connection(self, connection, client_addr):
+        if DEBUG:
+            print(f"DBG: Peer connected from {client_addr}")
+        reader = connection.makefile(buffering=1, encoding='utf-8')
+
+        while True:
+            data: str = reader.readline(MAX_MESSAGE_SIZE)
+            if not data:
+                if DEBUG:
+                    print(f"Empty command recieved, closing thread for {client_addr}")
+                break
+
+            if DEBUG:
+                print(f"DBG: Got peer msg from {client_addr}: {data}")
+            self.process_peer_message(data, client_addr)
 
     # Listen for new peer connection requests,
     # validating the request's JWT token and opening
@@ -139,21 +165,14 @@ class ZtContext:
         server.listen(0)
         while True:
             try:
-                connection, client_addr = server.accept()
-                reader = connection.makefile(buffering=1, encoding='utf-8')
-
-                while True:
-                    data: str = reader.readline(MAX_MESSAGE_SIZE)
-                    if not data:
-                        break
-
-                    args = (data, client_addr)
-                    if DEBUG:
-                        print(f"DBG: Got peer msg from {client_addr}: {data}")
-                    threading.Thread(target=self.process_peer_message, args=args).start()
+                connection, (client_addr, client_port) = server.accept()
+                args = (connection, client_addr)
+                thread = threading.Thread(target=self.process_peer_connection, args=args)
+                thread.daemon = True
+                thread.start()
 
             except Exception as e:
-                print(f"Error while processing message: {e}")
+                print(f"Error while processing connection: {e}")
 
     def listen_local_commands(self):
         if DEBUG:
@@ -161,16 +180,22 @@ class ZtContext:
 
         with NamedPipe(LOCAL_COMMAND_PIPE, 'r') as pipe:
             while True:
-                msg = json.loads(pipe.readline())
+                try:
+                    msg = json.loads(pipe.readline())
 
-                if DEBUG:
-                    print(f"DBG: Got local command: {msg}")
+                    if DEBUG:
+                        print(f"DBG: Got local command: {msg}")
 
-                if msg["type"] == "connect":
-                    self.request_connection(msg["peer_addr"])
+                    if msg["type"] == "connect":
+                        self.request_connection(msg["peer_addr"])
+                except Exception as e:
+                    print(f"Exception while processing local command: {e}")
 
 def daemon_main(args):
     private_key = WireguardKey.generate()
+
+    if DEBUG:
+        print("DBG: Creating wgTest0")
     wg = (
         ZTDevice.create("wgTest0", 
                         private_key = str(private_key),
@@ -182,16 +207,20 @@ def daemon_main(args):
     ctx = ZtContext(wg, auth)
 
     try:
-        threading.Thread(target=ctx.listen_local_commands).start()
+        local_comm_thread = threading.Thread(target=ctx.listen_local_commands)
+        local_comm_thread.daemon = True
+        local_comm_thread.start()
 
         peer_listen_args = ("0.0.0.0", COMM_PORT)
-        # threading.Thread(target=ctx.listen_for_peers, args=peer_listen_args)
         ctx.listen_for_peers(*peer_listen_args)
     finally:
+        if DEBUG:
+            print("DBG: Disabling wireguard device")
         wg.down()
 
 def connect_subcommand(args):
-    print("DBG: Sending connection command")
+    if DEBUG:
+        print("DBG: Sending connection command")
     with NamedPipe(LOCAL_COMMAND_PIPE, 'w') as pipe:
         msg = json.dumps({
             "type": "connect",
@@ -201,6 +230,8 @@ def connect_subcommand(args):
         pipe.write(msg + '\n')
 
 if __name__ == "__main__":
+    if DEBUG:
+        print("DBG: Starting peer daemon")
     parser = argparse.ArgumentParser(
         prog="zt-host",
     )
@@ -215,6 +246,8 @@ if __name__ == "__main__":
     connect_sub = subcommands.add_parser("connect")
     connect_sub.set_defaults(func=connect_subcommand)
     connect_sub.add_argument("peer_addr", help="The address for the peer on the physical network")
+    if DEBUG:
+        print("DBG: Subcommands setup")
 
     args = parser.parse_args(sys.argv[1:])
     if hasattr(args, "func"):

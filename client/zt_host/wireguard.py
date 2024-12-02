@@ -8,7 +8,7 @@ class Peer:
     public_key: str # The peer's wireguard public key
     endpoint_addr: str # The endpoint address (address of the real interface for this peer)
     endpoint_port: int # The endpoint port
-    allowed_ips: List[str] # List of CIDR address/subnets that we forward to this peer
+    allowed_ips: str # List of CIDR address/subnets that we forward to this peer
     persistent_keepalive: int = 15
 
     # Extra fields
