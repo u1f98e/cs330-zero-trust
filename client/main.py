@@ -1,16 +1,16 @@
+#!/usr/bin/env python3
+
 import argparse
-import datetime
-import itertools
 import sched
 import socket
 import threading
 import json
 import time
-from typing import Dict, List
 import jwt
 import sys
 from wireguard_tools import WireguardKey
 
+from zt_host.session import ZTSessionManager
 from zt_host.local_pipe import NamedPipe
 from zt_host.auth import AUTH_PUBLIC_KEY, ZTAuth
 from zt_host.wireguard import ZTDevice, Peer
@@ -21,44 +21,21 @@ COMM_PORT = 8889
 LOCAL_COMMAND_PIPE="/var/zt-local-pipe"
 DEBUG = True
 
-class Session:
-    peer_addr: str
-    peer_pub_key: str
-    expiration: datetime
-
 class ZtContext:
     wg: ZTDevice
     auth: ZTAuth
     scheduler: sched.scheduler
+    sessions: ZTSessionManager
     name: str
-
-    incoming_sessions: List[Session] = []
-    outgoing_sessions: Dict[str, Session] = {}
 
     def __init__(self, _wg: ZTDevice, _auth: ZTAuth):
         self.wg = _wg
         self.auth = _auth
         self.scheduler = sched.scheduler(time.time, time.sleep)
+        self.sessions = ZTSessionManager(self.wg)
 
     def expire_incoming_sessions(self):
-        def f(session: Session):
-            if session.expiration < now:
-                if DEBUG:
-                    print(f"DBG: Expiring session for {session.peer_addr}") 
-                self.wg.remove_peer(session.peer_pub_key) 
-                return False
-            else:
-                return True
-
-        now = datetime.datetime.now()
-        self.incoming_sessions[:] = itertools.filterfalse(f, self.incoming_sessions)
-    
-    # TODO: Call this automatically with sched or similar
-    def refresh_session(self, peer_pub_key: str):
-        session = self.outgoing_sessions[peer_pub_key]
-        token = self.auth.request_refresh_token(session.peer_addr)
-        # TODO: Send to client
-        return
+        self.sessions.expire_incoming_sessions()
 
     def request_connection(self, peer_addr: str):
         """Authorize and request a connection to a peer"""
@@ -71,7 +48,11 @@ class ZtContext:
         peer_sock.connect((peer_addr, COMM_PORT))
         local_addr, _ = peer_sock.getsockname()
 
-        token = self.auth.request_connection_token(peer_addr, local_addr, self.wg.pub_key)
+        token = (self.auth.request_connection_token(
+            peer_addr, 
+            local_addr, 
+            wg_addr = self.wg.wg_addr, 
+            pub_key = self.wg.pub_key))
 
         request = {
             "type": "connect",
@@ -80,26 +61,31 @@ class ZtContext:
         if DEBUG:
             print(f"DBG: Sending request {json.dumps(request)}")
 
-        s = peer_sock.makefile('rw')
-        s.write(json.dumps(request) + '\n')
-        s.flush()
-        response = s.readline(MAX_MESSAGE_SIZE)
+        sock = peer_sock.makefile('rw')
+        sock.write(json.dumps(request) + '\n')
+        sock.flush()
+
+        response = sock.readline(MAX_MESSAGE_SIZE)
         if DEBUG:
             print(f"Recieved: {response}")
         response = json.loads(response)
-        if "result" not in response:
-            raise Exception("Response message from peer did not contain 'result' field")
-        if response["result"] != "ok":
-            if "msg" in response:
-                raise Exception(f"Peer returned an error during connection request: {response["msg"]}")
-            else:
-                raise Exception(f"Peer returned an error during connection request")
+        # if "result" not in response:
+        #     raise Exception("Response message from peer did not contain 'result' field")
+        # if response["result"] != "ok":
+        #     if "msg" in response:
+        #         raise Exception(f"Peer returned an error during connection request: {response["msg"]}")
+        #     else:
+        #         raise Exception(f"Peer returned an error during connection request")
 
-        session = Session()
-        session.peer_addr = peer_addr
-        session.peer_pub_key = response['pub_key']
-        session.expiration = token.expiration
-        self.outgoing_sessions[session.peer_pub_key] = session
+        pub_key = response['pub_key']
+        peer_wg_addr = response['wg_addr']
+
+        peer = Peer()
+        peer.public_key = pub_key
+        peer.endpoint_addr = peer_addr
+        peer.endpoint_port = WIREGUARD_PORT
+        peer.allowed_ips = [peer_wg_addr]
+        self.sessions.add_outgoing(peer, token.expiration)
 
     def handle_connect_request(self, token: str, client_addr: str):
         if DEBUG:
@@ -122,26 +108,30 @@ class ZtContext:
                 print(f"DBG: endpoint_addr: {peer.endpoint_addr}")
             return
 
-        self.wg.add_peer(peer)
-
-        session = Session()
-        session.expiration = expiration
-        session.peer_pub_key = peer.public_key
-        session.peer_addr = peer.endpoint_addr
-        self.incoming_sessions.append(session)
+        if DEBUG:
+            print(f"DBG: Adding new peer {peer}")
+        self.sessions.add_incoming(peer, expiration)
 
         # Schedule an expiration check when this session is supposed to expire
         self.scheduler.enterabs(expiration, 1, ZtContext.expire_incoming_sessions, argument=[self])
 
-    def process_peer_message(self, data: str, client_addr: str):
+        return json.dumps({
+            "pub_key": self.wg.pub_key,
+            "wg_addr": self.wg.wg_addr
+        })
+
+    def process_peer_message(self, response_writer, data: str, client_addr: str):
         msg = json.loads(data)
         if msg["type"] == "connect":
-            self.handle_connect_request(msg["token"], client_addr)
+            response = self.handle_connect_request(msg["token"], client_addr)
+            response_writer.write(response + '\n')
+            response_writer.flush()
         
-    def process_peer_connection(self, connection, client_addr):
+    def process_peer_connection(self, sock: socket.socket, client_addr):
         if DEBUG:
             print(f"DBG: Peer connected from {client_addr}")
-        reader = connection.makefile(buffering=1, encoding='utf-8')
+        reader = sock.makefile('r', buffering=1, encoding='utf-8')
+        writer = sock.makefile('w', encoding='utf-8')
 
         while True:
             data: str = reader.readline(MAX_MESSAGE_SIZE)
@@ -152,7 +142,7 @@ class ZtContext:
 
             if DEBUG:
                 print(f"DBG: Got peer msg from {client_addr}: {data}")
-            self.process_peer_message(data, client_addr)
+            self.process_peer_message(writer, data, client_addr)
 
     # Listen for new peer connection requests,
     # validating the request's JWT token and opening
@@ -172,7 +162,7 @@ class ZtContext:
                 thread.start()
 
             except Exception as e:
-                print(f"Error while processing connection: {e}")
+                raise Exception(f"Error while processing connection") from e
 
     def listen_local_commands(self):
         if DEBUG:
@@ -181,15 +171,21 @@ class ZtContext:
         with NamedPipe(LOCAL_COMMAND_PIPE, 'r') as pipe:
             while True:
                 try:
-                    msg = json.loads(pipe.readline())
+                    line = pipe.readline()
+                    if not line:
+                        if DEBUG:
+                            print(f"DBG: Empty local command received, skipping")
+                        continue
 
+                    msg = json.loads(line)
                     if DEBUG:
                         print(f"DBG: Got local command: {msg}")
 
                     if msg["type"] == "connect":
                         self.request_connection(msg["peer_addr"])
                 except Exception as e:
-                    print(f"Exception while processing local command: {e}")
+                    raise Exception(f"Exception while processing local command") from e
+                    break
 
 def daemon_main(args):
     private_key = WireguardKey.generate()
@@ -201,7 +197,8 @@ def daemon_main(args):
                         private_key = str(private_key),
                         public_key = str(private_key.public_key()),
                         wg_addr = args.listen_addr, # TODO: Get from auth server or something
-                        listen_port = WIREGUARD_PORT)
+                        listen_port = WIREGUARD_PORT,
+                        force = True)
     )
     auth = ZTAuth((args.auth_addr, int(args.auth_port)))
     ctx = ZtContext(wg, auth)

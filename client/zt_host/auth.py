@@ -63,6 +63,7 @@ class AuthNode:
 
 class PeerAuthToken:
 	jwt: str
+	allowed_ips: List[str]
 	# JWT also includes the following fields, but we also receive it separately 
 	# to avoid needing to decode it
 	expiration: datetime = None
@@ -107,11 +108,11 @@ class ZTAuth:
 		# TODO Load credentials from system to be used with the auth server
 
 	# TODO: Delete me
-	def create_fake_request_jwt(local_addr, pub_key):
+	def create_fake_request_jwt(local_addr, wg_addr, pub_key):
 		claims = { 
 			"pub": pub_key,
 			"addr": local_addr,
-			"ips": f"{local_addr}/32", # Semicolon seperated list of CIDR ranges
+			"ips": f"{wg_addr}", # Semicolon seperated list of CIDR ranges
 			"exp": int(datetime.datetime.fromisoformat("2030-01-01").timestamp())
 		}
 
@@ -120,12 +121,14 @@ class ZTAuth:
 		token.expiration = claims['exp']
 		return token
 
-	def request_connection_token(self, peer_addr: str, local_addr: str, pub_key) -> PeerAuthToken:
+	def request_connection_token(self, peer_addr: str, local_addr: str, wg_addr, pub_key) -> PeerAuthToken:
 		def request(sock: socket.socket) -> PeerAuthToken:
 			# TODO: This is a fake token for now, this should
 			# instead send a request to the auth node with `sock` to get
 			# a token
-			return ZTAuth.create_fake_request_jwt(local_addr, pub_key)
+
+			# TODO: We also need to get some extra info like which Allowed IPs the peer has
+			return ZTAuth.create_fake_request_jwt(local_addr, wg_addr, pub_key)
 
 		return self.on_best_node(request)
 

@@ -4,7 +4,7 @@ from pyroute2 import IPRoute, NDB, WireGuard
 from typing import Self, List, Tuple
 
 class Peer:
-    # Device config fields
+    # Device config fields, required by pyroute2
     public_key: str # The peer's wireguard public key
     endpoint_addr: str # The endpoint address (address of the real interface for this peer)
     endpoint_port: int # The endpoint port
@@ -29,13 +29,17 @@ class ZTDevice:
         dev.pub_key = public_key
 
         with NDB() as ndb:
-            if dev.ifname in ndb.interfaces:
+            if dev.ifname in ndb.interfaces and not force:
                 print(f"Using existing network device '{dev.ifname}'")
                 (ndb.interfaces[dev.ifname]
                     .set(state='up')
                     .commit()
                 )
             else:
+                if dev.ifname in ndb.interfaces:
+                    print(f"Removing existing device {dev.ifname}")
+                    ndb.interfaces[dev.ifname].remove().commit()
+
                 print(f"Creating new network device '{dev.ifname}'")
                 (ndb.interfaces.create(kind='wireguard', ifname=dev.ifname) 
                     .add_ip(dev.wg_addr)
@@ -66,6 +70,10 @@ class ZTDevice:
     def add_peer(self, peer: Peer):
         peer_dict = peer.__dict__
         with WireGuard() as wg:
+            print(f"DBG: {self.ifname}")
+            output = "\n".join("{0} {1}".format(k, v)  for k,v in peer_dict.items())
+            print(f"DBG: {output}")
+
             wg.set(self.ifname, peer=peer_dict)	
 
     def remove_peer(self, public_key: str):
@@ -77,15 +85,16 @@ class ZTDevice:
 
     def up(self):
         with NDB() as ndb:
-            with ndb.interfaces[self.ifname] as link:
-                link.set(state='up')
+            link = ndb.interfaces[self.ifname]
+            link.set(state='up')
 
     def down(self):
         with NDB() as ndb:
-            with ndb.interfaces[self.ifname] as link:
-                link.set(state='down')
+            link = ndb.interfaces[self.ifname]
+            link.set(state='down')
 
     def remove(self):
         with NDB() as ndb:
-            link = ndb.interfaces[self.ifname]
+            ndb.interfaces[self.ifname].remove()
+
 

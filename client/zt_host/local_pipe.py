@@ -31,7 +31,17 @@ class NamedPipe:
 		os.remove(self.path)
 
 	def readline(self, max_line_size = 2048) -> str:
-		return self.fd.readline(max_line_size)
+		line = self.fd.readline(max_line_size)
+
+		# Reopen pipe if connection closes early
+		if not line:
+			self.fd.close()
+			self.open()
+			
+		return line
 
 	def write(self, buf):
 		self.fd.write(buf)
+
+	def flush(self):
+		self.fd.flush()	
