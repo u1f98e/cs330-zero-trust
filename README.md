@@ -56,6 +56,32 @@ the root server (writes generally should be infrequent)
 
 TODO: How do cache servers get specified/discovered?
 
+### Connecting to Keycloak with a Local Browser
+To connect to the Keycloak container within GNS3, you'll need to create
+a network interface to bridge the GNS3 network and your local network.
+
+**Linux**:
+Host: Create a TAP virtual network device and assign it a subnet that
+matches the network inside GNS3:
+```
+sudo ip tuntap add mode tap tap0           # Create the TAP device
+sudo ip addr add 192.168.99.1/24 dev tap0  # Assign an address
+sudo ip link set tap0 up                   # Enable the device
+```
+
+GNS:
+Add a cloud node to your network graph, right click to configure, and
+add a TAP interface with the same name as the device you configured (tap0)
+
+Ensure that the other hosts on GNS are on the same subnet as your TAP
+device. You can set the configuration for the Keycloak container with
+`right click > Configure > Network Configuration Edit` and set an address
+for eth0 (192.168.99.10). The demo scripts also use 192.168.99.0/24.
+
+You should be able to now access the GNS network from your host machine.
+In your browser, go to `192.168.99.10:8080` to access Keycloak assuming
+the default configuration.
+
 ## Tunnel Client
 Our custom host to host client uses wireguard to form secure tunnels between hosts.
 
