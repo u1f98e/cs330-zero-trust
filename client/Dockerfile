@@ -7,7 +7,6 @@ WORKDIR /root/zt-host
 
 ADD requirements.txt requirements.txt
 RUN pip install -r requirements.txt
-RUN pip install pyrasite
 
 ADD main.py main.py
 ADD zt_host zt_host
